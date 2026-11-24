@@ -1819,7 +1819,10 @@ function updateSlLine(engineName) {
     // unique price match can locate a swing; a manual or clamped stop may have no match.
     const matches = new Set(swings.filter(swing => swing.type === type && swing.price === price)
       .map(swing => swing.time));
-    if (matches.size === 1) levels.push({ barTime: matches.values().next().value, price });
+    const swingTime = matches.size === 1 ? matches.values().next().value : undefined;
+    const barTime = c.lastBars.some(bar => bar.time === swingTime)
+      ? swingTime : c.lastBars[c.lastBars.length - 1]?.time;
+    if (Number.isFinite(barTime)) levels.push({ barTime, price });
   }
 
   c.slLines.setLevels(levels);
