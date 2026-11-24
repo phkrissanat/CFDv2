@@ -1599,8 +1599,7 @@ function createTradeLineLayer(chart, series, color, dash = [], width = 2) {
             if (x === null || x >= mediaSize.width || y === null || y < 0 || y > mediaSize.height) continue;
             context.strokeStyle = level.color ?? color;
             context.beginPath();
-            const startX = Math.min(x, mediaSize.width - (level.minVisibleWidth ?? 0));
-            context.moveTo(Math.max(0, startX), y);
+            context.moveTo(Math.max(0, x), y);
             context.lineTo(mediaSize.width, y);
             context.stroke();
           }
@@ -1795,13 +1794,35 @@ function updateManualTradeProfits() {
   }
 }
 
+function findSwingPoints(bars, lookback) {
+  const swings = [];
+  for (let i = lookback; i < bars.length - lookback; i++) {
+    const window = bars.slice(i - lookback, i + lookback + 1);
+    if (window.every(b => b.high <= bars[i].high)) {
+      swings.push({ type: 'high', time: bars[i].time, price: bars[i].high });
+    }
+    if (window.every(b => b.low >= bars[i].low)) {
+      swings.push({ type: 'low', time: bars[i].time, price: bars[i].low });
+    }
+  }
+  return swings;
+}
+
 function updateSlLine(engineName) {
   const c = charts[engineName];
   if (!c || !c.candleSeries) return;
   c.slPriceLines.forEach(line => c.candleSeries.removePriceLine(line));
   c.slPriceLines = [];
   const levels = [];
+  const closedBars = c.lastBars.slice(0, -1);
+  const closedTimes = new Set(closedBars.map(bar => bar.time));
   const swings = Object.values(c.lastSwingsByProfile).flat();
+  // Recover older anchors for display only. Python publishes the latest swing per profile.
+  for (const { lookbackKey } of SWING_PROFILES[engineName] ?? []) {
+    for (const swing of findSwingPoints(closedBars, SWING_LOOKBACK[lookbackKey])) {
+      swings.push(swing);
+    }
+  }
 
   for (const trade of allTrades) {
     if (trade.engine !== engineName || trade.status !== 'open') continue;
@@ -1818,14 +1839,10 @@ function updateSlLine(engineName) {
     const type = trade.direction === 'BUY' ? 'low' : trade.direction === 'SELL' ? 'high' : null;
     // Trades report the applied stop price but not its source time. An exact,
     // unique price match can locate a swing; a manual or clamped stop may have no match.
-    const matches = new Set(swings.filter(swing => swing.type === type && swing.price === price)
-      .map(swing => swing.time));
-    const swingTime = matches.size === 1 ? matches.values().next().value : undefined;
-    const hasSwingBar = c.lastBars.some(bar => bar.time === swingTime);
-    const barTime = hasSwingBar ? swingTime : c.lastBars[c.lastBars.length - 1]?.time;
-    if (!Number.isFinite(barTime)) continue;
-    // Leave enough of the guide visible next to the native SL title.
-    levels.push({ barTime, price, minVisibleWidth: hasSwingBar ? 0 : 88 });
+    const matches = new Set(swings.filter(swing =>
+      swing.type === type && swing.price === price && closedTimes.has(swing.time)
+    ).map(swing => swing.time));
+    if (matches.size === 1) levels.push({ barTime: matches.values().next().value, price });
   }
 
   c.slLines.setLevels(levels);
