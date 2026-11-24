@@ -1599,7 +1599,8 @@ function createTradeLineLayer(chart, series, color, dash = [], width = 2) {
             if (x === null || x >= mediaSize.width || y === null || y < 0 || y > mediaSize.height) continue;
             context.strokeStyle = level.color ?? color;
             context.beginPath();
-            context.moveTo(Math.max(0, x), y);
+            const startX = Math.min(x, mediaSize.width - (level.minVisibleWidth ?? 0));
+            context.moveTo(Math.max(0, startX), y);
             context.lineTo(mediaSize.width, y);
             context.stroke();
           }
@@ -1820,9 +1821,11 @@ function updateSlLine(engineName) {
     const matches = new Set(swings.filter(swing => swing.type === type && swing.price === price)
       .map(swing => swing.time));
     const swingTime = matches.size === 1 ? matches.values().next().value : undefined;
-    const barTime = c.lastBars.some(bar => bar.time === swingTime)
-      ? swingTime : c.lastBars[c.lastBars.length - 1]?.time;
-    if (Number.isFinite(barTime)) levels.push({ barTime, price });
+    const hasSwingBar = c.lastBars.some(bar => bar.time === swingTime);
+    const barTime = hasSwingBar ? swingTime : c.lastBars[c.lastBars.length - 1]?.time;
+    if (!Number.isFinite(barTime)) continue;
+    // Leave enough of the guide visible next to the native SL title.
+    levels.push({ barTime, price, minVisibleWidth: hasSwingBar ? 0 : 56 });
   }
 
   c.slLines.setLevels(levels);
