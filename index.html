@@ -1825,7 +1825,7 @@ function updateSlLine(engineName) {
     const barTime = hasSwingBar ? swingTime : c.lastBars[c.lastBars.length - 1]?.time;
     if (!Number.isFinite(barTime)) continue;
     // Leave enough of the guide visible next to the native SL title.
-    levels.push({ barTime, price, minVisibleWidth: hasSwingBar ? 0 : 56 });
+    levels.push({ barTime, price, minVisibleWidth: hasSwingBar ? 0 : 88 });
   }
 
   c.slLines.setLevels(levels);
