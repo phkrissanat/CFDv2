@@ -1738,7 +1738,7 @@ const SWING_PROFILES = {
 };
 // Chart labels only: keep the latest N highs and N lows per profile so the chart stays
 // readable. Display-only - the swing values synced to the bot are computed from the full list.
-const MAX_SWING_LABELS_PER_SIDE = 3;
+const MAX_SWING_LABELS_PER_SIDE = 5;
 function limitSwingsForDisplay(swings) {
   const keep = new Set();
   ['high', 'low'].forEach(type => {
@@ -1758,6 +1758,7 @@ function swingsToMarkers(swings, style = {}) {
     position: s.type === 'high' ? 'aboveBar' : 'belowBar',
     color: s.type === 'high' ? colorHigh : colorLow,
     shape,
+    size: 0.55,
     text: `${s.type === 'high' ? 'H' : 'L'} ${s.price.toFixed(2)}${labelSuffix}`,
   }));
 }
@@ -1808,22 +1809,28 @@ function findSwingPoints(bars, lookback) {
   return swings;
 }
 
-function updateSlLine(engineName) {
+function swingHistoryForChart(c, engineName) {
+  const closedBars = c.lastBars.slice(0, -1);
+  const closedTimes = new Set(closedBars.map(bar => bar.time));
+  return (SWING_PROFILES[engineName] ?? []).map(profile => {
+    const swings = new Map();
+    for (const swing of findSwingPoints(closedBars, SWING_LOOKBACK[profile.lookbackKey])) {
+      swings.set(swing.type + ':' + swing.time, swing);
+    }
+    // Prefer Python's published point for a candle reported by both sources.
+    for (const swing of c.lastSwingsByProfile[profile.fieldSuffix] ?? []) {
+      if (closedTimes.has(swing.time)) swings.set(swing.type + ':' + swing.time, swing);
+    }
+    return { profile, swings: [...swings.values()].sort((a, b) => a.time - b.time) };
+  });
+}
+
+function updateSlLine(engineName, swings) {
   const c = charts[engineName];
   if (!c || !c.candleSeries) return;
   c.slPriceLines.forEach(line => c.candleSeries.removePriceLine(line));
   c.slPriceLines = [];
   const levels = [];
-  const closedBars = c.lastBars.slice(0, -1);
-  const closedTimes = new Set(closedBars.map(bar => bar.time));
-  const swings = Object.values(c.lastSwingsByProfile).flat();
-  // Recover older anchors for display only. Python publishes the latest swing per profile.
-  for (const { lookbackKey } of SWING_PROFILES[engineName] ?? []) {
-    for (const swing of findSwingPoints(closedBars, SWING_LOOKBACK[lookbackKey])) {
-      swings.push(swing);
-    }
-  }
-
   for (const trade of allTrades) {
     if (trade.engine !== engineName || trade.status !== 'open') continue;
     const price = parseFloat(trade.sl_price);
@@ -1840,7 +1847,7 @@ function updateSlLine(engineName) {
     // Trades report the applied stop price but not its source time. An exact,
     // unique price match can locate a swing; a manual or clamped stop may have no match.
     const matches = new Set(swings.filter(swing =>
-      swing.type === type && swing.price === price && closedTimes.has(swing.time)
+      swing.type === type && swing.price === price
     ).map(swing => swing.time));
     if (matches.size === 1) levels.push({ barTime: matches.values().next().value, price });
   }
@@ -1915,16 +1922,15 @@ function updateChartMarkers(engineName) {
     }
   });
 
-  const profiles = chartDisplay.show_swings ? (SWING_PROFILES[engineName] || []) : [];
-  const swingMarks = profiles.flatMap(profile => {
-    const swings = c.lastSwingsByProfile?.[profile.fieldSuffix] || [];
-    return swingsToMarkers(limitSwingsForDisplay(swings), profile);
-  });
-  markers.push(...swingMarks.map(({ time, position, color, shape }) => ({ time, position, color, shape })));
+  const history = swingHistoryForChart(c, engineName);
+  const swingMarks = chartDisplay.show_swings ? history.flatMap(({ profile, swings }) =>
+    swingsToMarkers(limitSwingsForDisplay(swings), profile)
+  ) : [];
+  markers.push(...swingMarks.map(({ time, position, color, shape, size }) => ({ time, position, color, shape, size })));
   markers.sort((a, b) => a.time - b.time);
   c.candleSeries.setMarkers(markers);
   c.swingLabels.setMarks(swingMarks);
-  updateSlLine(engineName);
+  updateSlLine(engineName, history.flatMap(({ swings }) => swings));
   updateEntryLine(engineName);
 }
 
@@ -2220,6 +2226,7 @@ function startDashboard(db) {
       const input = document.getElementById(`swingLookback${key}`);
       if (input) input.value = SWING_LOOKBACK[key];
     }
+    updateChartMarkers('H4');
   });
 
   const q = query(collection(db, "trades"), orderBy("entry_time", "desc"));
