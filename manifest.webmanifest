@@ -1,7 +1,7 @@
 {
   "id": "./",
-  "name": "CFDv2 Demo",
-  "short_name": "CFDv2",
+  "name": "CFD",
+  "short_name": "CFD",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
